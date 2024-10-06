@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Güneş Sistemi Simülasyonu</title>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="trackingmouse.js"></script>
+    <script>
+        // Sahneyi ve kamera ayarlarını oluştur
+        var scene = new THREE.Scene();
+        var camera = new THREE.PerspectiveCamera(
+            75, 
+            window.innerWidth / window.innerHeight, 
+            0.1, 
+            1000
+        );
+
+        const textureLoader = new THREE.TextureLoader();
+        const earthTexture = textureLoader.load('path_to_earth_texture.jpg'); // Earth texture
+        const asteroidTexture = textureLoader.load('texture/astertexture.jpg'); // Asteroid texture
+
+
+        camera.position.set(0, 0, 50); // Kamerayı daha geniş bir alana konumlandır
+        let targetPosition = new THREE.Vector3(0, 0, 5); // Kameranın hedef konumu
+        let targetLookAt = new THREE.Vector3(0, 0, 0);   // Kameranın hedef yönü
+
+        var renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // TrackballControls'u başlat
+        var controls = new THREE.TrackballControls(camera, renderer.domElement);
+        controls.rotateSpeed = 5.0;
+        controls.zoomSpeed = 2.0;
+        controls.panSpeed = 1.0;
+        controls.noZoom = false;
+        controls.noPan = false;
+        controls.staticMoving = true;
+        controls.dynamicDampingFactor = 0.3;
+
+        // Güneş Sistemi'ndeki gezegenlerin yörünge elemanları
+        var heavenlyBodies = [];
+        var asteroids = []; // Asteroitler için yeni dizi
+        var asteroidMeshes = []; // Asteroit mesh referansları için dizi
+
+        // Güneş
+        heavenlyBodies.push(new Trajectory("Sun", 0, 0, 0, 0, 0, 0, 0)); // Güneş sabit bir konumda
+
+        // Gezegenler (yarı çapları artırılarak)
+        heavenlyBodies.push(new Trajectory("Venus", 1.4, 3.39, 54.884, 0.0068, 76.680, 50.115, 225 / 365.25)); // Venüs
+        heavenlyBodies.push(new Trajectory("Earth", 1.8, 0, 102.937, 0.0167, 0, 357.528, 365.25)); // Dünya
+        heavenlyBodies.push(new Trajectory("Mars", 2.2, 1.85, 286.501, 0.0935, 49.558, 19.412, 687 / 365.25)); // Mars
+
+        // Asteroit eklemek için örnekler
+        asteroids.push(new Trajectory("2004TN1", 2.74, 8.4, 233.5, 0.698, 214.0, 66.6, 4.55));
+        asteroids.push(new Trajectory("2011SM68", 1.40, 19.2, 109.1, 0.664, 24.2, 292.6, 1.65));
+        asteroids.push(new Trajectory("2014EG45", 1.61, 16.5, 296.2, 0.498, 164.3, 156.4, 2.04));
+        asteroids.push(new Trajectory("2003EE16", 1.42, 0.6, 259.7, 0.614, 127.0, 62.7, 1.69));
+        asteroids.push(new Trajectory("2012TY52", 1.66, 9.6, 252.6, 0.553, 221.8, 323.4, 2.15));
+        asteroids.push(new Trajectory("2009WM1", 1.18, 25.8, 162.6, 0.169, 240.3, 355.3, 1.28));
+        asteroids.push(new Trajectory("2006SU49", 1.41, 2.5, 199.0, 0.312, 303.2, 200.2, 1.85));
+        asteroids.push(new Trajectory("1998SC15", 1.27, 16.1, 277.4, 0.415, 198.8, 27.0, 1.80));
+        asteroids.push(new Trajectory("2010MU112", 1.76, 48.0, 119.2, 0.540, 261.2, 300.5, 2.71));
+        asteroids.push(new Trajectory("2011AG5", 1.43, 3.7, 53.5, 0.390, 135.7, 60.8, 1.99));
+        asteroids.push(new Trajectory("1994PC1", 1.35, 33.5, 47.6, 0.328, 117.9, 136.5, 1.56));
+        asteroids.push(new Trajectory("2012SW20", 2.46, 10.2, 62.1, 0.68, 209.8, 224.3, 3.86));
+        asteroids.push(new Trajectory("2007PV27", 1.27, 24.6, 107.6, 0.371, 324.5, 324.1, 1.44));
+        asteroids.push(new Trajectory("2007TU24", 2.04, 5.6, 334.2, 0.534, 127.0, 132.9, 2.92));
+        asteroids.push(new Trajectory("2004XP14", 1.05, 33.0, 273.7, 0.158, 281.0, 4.5, 1.08));
+
+        // Constructor to generate objects that identify orbital elements.
+        function Trajectory(name, smA, oI, aP, oE, aN, mAe, Sidereal) {
+            this.name = name;                          // Objeyi adlandır
+            this.smA = smA;                            // Yarı büyük eksen
+            this.oI = oI * 0.01745329;                 // Yörünge eğimi (radyan cinsinden)
+            this.aP = aP * 0.01745329;                 // Perigee argümanı (radyan cinsinden)
+            this.oE = oE;                              // Yörünge eksantrikliği
+            this.aN = aN * 0.01745329;                 // Yükselen düğüm (radyan cinsinden)
+            this.period = Sidereal;                    // Sideral dönem (Dünyanın yörüngesine göre oran)
+            this.epochMeanAnomaly = mAe * 0.01745329;  // Dönüm anomalisinin başlangıç değeri (radyan cinsinden)
+            this.trueAnomoly = 0;                      // Başlangıçta sıfır
+        }
+
+        // Trajectory Propagator
+        Trajectory.prototype.propagate = function (uA) {
+            var pos = [];
+            var theta = uA;                           // Gerçek anomaliyi güncelle
+            var smA = this.smA;                       // Yarı büyük eksen
+            var oI = this.oI;                         // Yörünge eğimi
+            var aP = this.aP;                         // Perigee argümanı
+            var oE = this.oE;                         // Yörünge eksantrikliği
+            var aN = this.aN;                         // Yükselen düğüm
+            var sLR = smA * (1 - oE * oE);           // Semi-Latus Rectum hesapla
+            var r = sLR / (1 + oE * Math.cos(theta)); // Radial mesafeyi hesapla
+
+            // Pozisyon koordinatlarını hesapla
+            pos[0] = r * (Math.cos(aP + theta) * Math.cos(aN) - Math.cos(oI) * Math.sin(aP + theta) * Math.sin(aN));
+            pos[1] = r * (Math.cos(aP + theta) * Math.sin(aN) + Math.cos(oI) * Math.sin(aP + theta) * Math.cos(aN));
+            pos[2] = r * (Math.sin(aP + theta) * Math.sin(oI));
+
+            return pos;
+        };
+
+        // Gezegenlerin görselleştirilmesi
+        function createPlanet(name, radius, color) {
+            var geometry = new THREE.SphereGeometry(radius, 32, 32);
+            var material = new THREE.MeshBasicMaterial({ color: color });
+            var planet = new THREE.Mesh(geometry, material);
+            planet.name = name;
+            scene.add(planet);
+        }
+
+        // Asteroitlerin görselleştirilmesi
+        function createAsteroid(name, radius) {
+            var geometry = new THREE.SphereGeometry(radius, 16, 16); // Asteroitler için daha düşük poligon sayısı
+            var material = new THREE.MeshBasicMaterial({ map: asteroidTexture });
+            var asteroid = new THREE.Mesh(geometry, material);
+            asteroid.name = name;
+            scene.add(asteroid);
+            asteroidMeshes.push(asteroid); // Mesh referansını diziye ekle
+        }
+
+        // Güneş ve gezegenler için görselleri oluştur
+        createPlanet("Sun", 3, 0xFFFF00); // Güneş
+        createPlanet("Venus", 0.6, 0xE6B243); // Venüs
+        createPlanet("Earth", 0.8, 0x0056FF); // Dünya
+        createPlanet("Mars", 0.7, 0xFF5733); // Mars
+
+        // Asteroid görselleştirmesi
+        asteroids.forEach(function(asteroid) {
+            createAsteroid(asteroid.name, 0.25);
+        });
+
+        // Yörüngeleri çiz (yarı çapları artırılarak)
+        function createOrbitforSafe(trajectory) {
+            var orbitPoints = [];
+            for (var i = 0; i < 360; i++) {
+                var theta = i * Math.PI / 180;
+                var pos = trajectory.propagate(theta);
+                // Pozisyonları ölçeklendirin
+                orbitPoints.push(new THREE.Vector3(pos[0] * 6, pos[1] * 6, pos[2] * 6));
+            }
+            var geometry = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+            var line = new THREE.Line(
+                geometry, 
+                new THREE.LineBasicMaterial({ color: 0x30D631, opacity: 0.5, transparent: true })
+            );
+            scene.add(line);
+        }
+
+        function createOrbitforHazardous(trajectory) {
+            var orbitPoints = [];
+            for (var i = 0; i < 360; i++) {
+                var theta = i * Math.PI / 180;
+                var pos = trajectory.propagate(theta);
+                // Pozisyonları ölçeklendirin
+                orbitPoints.push(new THREE.Vector3(pos[0] * 6, pos[1] * 6, pos[2] * 6));
+            }
+            var geometry = new THREE.BufferGeometry().setFromPoints(orbitPoints);
+            var line = new THREE.Line(
+                geometry, 
+                new THREE.LineBasicMaterial({ color: 0xA52A2A, opacity: 0.5, transparent: true })
+            );
+            scene.add(line);
+        }
+
+        // Yörüngeleri oluştur
+        heavenlyBodies.forEach(function(body) {
+            createOrbitforSafe(body);
+        });
+
+        asteroids.forEach(function(asteroid) {
+            createOrbitforHazardous(asteroid);
+        });
+
+        // Pozisyon güncellemeleri
+        function updatePosition() {
+            // Gezegenlerin pozisyonlarını güncelle
+            for (var i = 0; i < heavenlyBodies.length; i++) {
+                var hB = heavenlyBodies[i];
+                var hbTAnomoly = hB.trueAnomoly;
+                var currentPosition = hB.propagate(hbTAnomoly); // Mevcut pozisyonu belirle
+
+                var Xpos = currentPosition[0] * 6; // Pozisyonları ölçeklendir
+                var Ypos = currentPosition[1] * 6;
+                var Zpos = currentPosition[2] * 6;
+                var hBName = hB.name;
+
+                var curObj = scene.getObjectByName(hBName);
+                if (curObj) {
+                    curObj.position.set(Xpos, Ypos, Zpos);
+                } else {
+                    console.warn("Objesi bulunamadı: " + hBName);
+                }
+
+                // Güncel true anomaliyi hesapla
+                hB.trueAnomoly += 0.01; // Her güncellemede true anomaly'yi artır
+            }
+
+            // Asteroidlerin pozisyonlarını güncelle
+            for (var i = 0; i < asteroids.length; i++) {
+                var asteroid = asteroids[i];
+                var phTAnomoly = asteroid.trueAnomoly;
+                var currentPositionPHA = asteroid.propagate(phTAnomoly); // Mevcut pozisyonu belirle
+
+                var Xpos = currentPositionPHA[0] * 6; // Pozisyonları ölçeklendir
+                var Ypos = currentPositionPHA[1] * 6;
+                var Zpos = currentPositionPHA[2] * 6;
+                var haName = asteroid.name;
+
+                // Asteroitlerin mesh referansları üzerinden pozisyonlarını güncelle
+                var asteroidMesh = asteroidMeshes.find(mesh => mesh.name === haName);
+                if (asteroidMesh) {
+                    asteroidMesh.position.set(Xpos, Ypos, Zpos);
+                } else {
+                    console.warn("Asteroit mesh'i bulunamadı: " + haName);
+                }
+
+                // Güncel true anomaliyi hesapla
+                asteroid.trueAnomoly += 0.01; // Her güncellemede true anomaly'yi artır
+            }
+        }
+
+        // Animasyon döngüsü
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update(); // TrackballControls'u güncelle
+            updatePosition(); // Pozisyonları güncelle
+            renderer.render(scene, camera);
+        }
+
+        animate(); // Animasyonu başlat
+
+        camera.position.z = 30;
+
+
+
+        // Pencere yeniden boyutlandırıldığında sahneyi güncelle
+        window.addEventListener('resize', function() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            controls.handleResize(); // TrackballControls için yeniden boyutlandırmayı yönet
+        }, false);
+    </script>
+</body>
+</html>
